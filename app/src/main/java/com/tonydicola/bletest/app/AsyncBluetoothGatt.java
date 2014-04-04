@@ -223,7 +223,6 @@ public class AsyncBluetoothGatt extends BluetoothGattCallback {
 
     // Write characteristic and return promise for its completion.
     public Promise<BluetoothGattCharacteristic, Integer, Void> writeCharacteristic(BluetoothGattCharacteristic characteristic) {
-        // TODO: Should you only return an async promise if a reliable write transaction is in progress??
         checkConnected();
         // If there's already a request in flight, return the current promise for results.
         DeferredObject<BluetoothGattCharacteristic, Integer, Void> deferred = writeCharacteristic.get(characteristic.getUuid());
@@ -232,7 +231,7 @@ public class AsyncBluetoothGatt extends BluetoothGattCallback {
         }
         // Read descriptor and return a promise for the results.
         deferred = new DeferredObject<BluetoothGattCharacteristic, Integer, Void>();
-        if (!gatt.readCharacteristic(characteristic)) {
+        if (!gatt.writeCharacteristic(characteristic)) {
             deferred.reject(null);
         }
         writeCharacteristic.put(characteristic.getUuid(), deferred);

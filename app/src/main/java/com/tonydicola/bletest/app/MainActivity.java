@@ -52,8 +52,6 @@ public class MainActivity extends Activity {
         messages = (TextView) findViewById(R.id.messages);
         input = (EditText) findViewById(R.id.input);
 
-        // Initialize the deferred manager to the default Android manager which will run callbacks
-        // on the main UI thread by default.
         dm = new AndroidDeferredManager();
     }
 
@@ -68,7 +66,8 @@ public class MainActivity extends Activity {
     // Scan for devices with the UART service and connect to it.
     private void scanForDevice() {
         scanner = new AsyncBluetoothLeScan(BluetoothAdapter.getDefaultAdapter());
-        dm.when(scanner.start(UART_UUID))
+        //dm.when(scanner.start(UART_UUID))
+        dm.when(scanner.start())
             // Progress callback will be called for every device that is found.
             .progress(new ProgressCallback<AsyncBluetoothLeScan.ScanResult>() {
                 @Override
@@ -135,7 +134,12 @@ public class MainActivity extends Activity {
             .done(new DoneCallback<Void>() {
                 @Override
                 public void onDone(Void result) {
-                    writeLine("Disconnected!");
+                    if (result != null) {
+                        writeLine("Disconnected with error code: " + result);
+                    }
+                    else {
+                        writeLine("Disconnected!");
+                    }
                     // Remove the tx characteristic so messages can't be sent.
                     tx = null;
                 }
@@ -144,11 +148,29 @@ public class MainActivity extends Activity {
 
     // Setup the UI to send and receive messages.
     private void setupUART() {
+        writeLine("Setup UART");
         // Save reference to RX and TX characteristics.
         tx = gatt.getService(UART_UUID).getCharacteristic(TX_UUID);
         rx = gatt.getService(UART_UUID).getCharacteristic(RX_UUID);
         // Enable notifications for RX characteristic updates.
-        dm.when(gatt.setCharacteristicNotification(rx, true))
+        BluetoothGattDescriptor client = rx.getDescriptor(CLIENT_UUID);
+        client.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+        dm.when(gatt.writeDescriptor(client))
+            // Fail callback called if the descriptor update fails.
+            .fail(new FailCallback<Integer>() {
+                @Override
+                public void onFail(Integer result) {
+                    writeLine("Failed to update RX client descriptor!");
+                }
+            })
+            // When the descriptor is updated, enable characteristic notifications.
+            .then(new DonePipe<BluetoothGattDescriptor, Void, Void, BluetoothGattCharacteristic>() {
+                @Override
+                public Promise<Void, Void, BluetoothGattCharacteristic> pipeDone(BluetoothGattDescriptor result) {
+                    writeLine("Ready!");
+                    return gatt.setCharacteristicNotification(rx, true);
+                }
+            })
             // Progress callback is called when the characteristic is updated.
             .progress(new ProgressCallback<BluetoothGattCharacteristic>() {
                 @Override
@@ -163,30 +185,6 @@ public class MainActivity extends Activity {
                 public void onFail(Void result) {
                     writeLine("Failed to enable notifications for RX characteristic updates!");
                 }
-            })
-            // Update the RX characteristic's client descriptor after notifications are enabled.
-            .then(new DonePipe<Void, BluetoothGattDescriptor, Integer, Void>() {
-                @Override
-                public Promise<BluetoothGattDescriptor, Integer, Void> pipeDone(Void result) {
-                    BluetoothGattDescriptor client = rx.getDescriptor(CLIENT_UUID);
-                    client.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                    return gatt.writeDescriptor(client);
-                }
-            })
-            // Fail callback is called if the client descriptor update fails.
-            .fail(new FailCallback<Integer>() {
-                @Override
-                public void onFail(Integer result) {
-                    writeLine("Failed to update RX client descriptor!");
-                }
-            })
-            // Done callback is called when the client descriptor is updated.
-            .done(new DoneCallback<BluetoothGattDescriptor>() {
-                @Override
-                public void onDone(BluetoothGattDescriptor result) {
-                    // Woo hoo, we are connected and finished!
-                    writeLine("Ready!");
-                }
             });
     }
 
@@ -197,7 +195,11 @@ public class MainActivity extends Activity {
         if (scanner != null) {
             scanner.stop();
         }
+        if (gatt != null) {
+            gatt.close();
+        }
         tx = null;
+        rx = null;
     }
 
     // Handler for mouse click on the send button.
@@ -225,9 +227,14 @@ public class MainActivity extends Activity {
     }
 
     // Write some text to the messages text view.
-    private void writeLine(CharSequence text) {
-        messages.append(text);
-        messages.append("\n");
+    private void writeLine(final CharSequence text) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                messages.append(text);
+                messages.append("\n");
+            }
+        });
     }
 
     // Boilerplate code from the activity creation:
