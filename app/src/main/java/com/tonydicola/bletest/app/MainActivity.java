@@ -66,8 +66,7 @@ public class MainActivity extends Activity {
     // Scan for devices with the UART service and connect to it.
     private void scanForDevice() {
         scanner = new AsyncBluetoothLeScan(BluetoothAdapter.getDefaultAdapter());
-        //dm.when(scanner.start(UART_UUID))
-        dm.when(scanner.start())
+        dm.when(scanner.start(UART_UUID))
             // Progress callback will be called for every device that is found.
             .progress(new ProgressCallback<AsyncBluetoothLeScan.ScanResult>() {
                 @Override
@@ -148,7 +147,6 @@ public class MainActivity extends Activity {
 
     // Setup the UI to send and receive messages.
     private void setupUART() {
-        writeLine("Setup UART");
         // Save reference to RX and TX characteristics.
         tx = gatt.getService(UART_UUID).getCharacteristic(TX_UUID);
         rx = gatt.getService(UART_UUID).getCharacteristic(RX_UUID);

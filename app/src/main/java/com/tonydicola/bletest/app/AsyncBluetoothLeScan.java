@@ -2,6 +2,7 @@ package com.tonydicola.bletest.app;
 
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.util.Log;
 
 import org.jdeferred.Promise;
 import org.jdeferred.impl.DeferredObject;
@@ -95,7 +96,9 @@ public class AsyncBluetoothLeScan implements BluetoothAdapter.LeScanCallback {
         }
         scan = new DeferredObject<Void, Void, ScanResult>();
         filter = uuid;
-        if (!adapter.startLeScan(uuid, this)) {
+        // Note the startLeScan overload that takes a list of UUIDs to filter is NOT used because
+        // it is broken with custom UUID values.
+        if (!adapter.startLeScan(this)) {
             scan.reject(null);
         }
         return scan.promise();
@@ -130,6 +133,7 @@ public class AsyncBluetoothLeScan implements BluetoothAdapter.LeScanCallback {
             }
             else {
                 // Manually filter service UUIDs if filtering is enabled (workaround for bug in 4.3/4.4)
+                Log.d("Foo", "SEARCHING");
                 List<UUID> serviceUUIDs = result.parseUUIDs();
                 for (UUID uuid : filter) {
                     if (serviceUUIDs.contains(uuid)) {
