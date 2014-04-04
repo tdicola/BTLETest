@@ -2,10 +2,7 @@ package com.tonydicola.bletest.app;
 
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothAdapter.LeScanCallback;
 import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothGatt;
-import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.os.Bundle;
@@ -15,11 +12,14 @@ import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import org.jdeferred.DoneCallback;
+import org.jdeferred.DonePipe;
+import org.jdeferred.FailCallback;
+import org.jdeferred.ProgressCallback;
+import org.jdeferred.Promise;
+import org.jdeferred.android.AndroidDeferredManager;
+
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 public class MainActivity extends Activity {
@@ -35,91 +35,12 @@ public class MainActivity extends Activity {
     private TextView messages;
     private EditText input;
 
-    // BTLE state
-    private BluetoothAdapter adapter;
-    private BluetoothGatt gatt;
+    // Bluetooth LE state
+    private AsyncBluetoothGatt gatt;
+    private AsyncBluetoothLeScan scanner;
+    private AndroidDeferredManager dm;
     private BluetoothGattCharacteristic tx;
     private BluetoothGattCharacteristic rx;
-
-    // Main BTLE device callback where much of the logic occurs.
-    private BluetoothGattCallback callback = new BluetoothGattCallback() {
-        // Called whenever the device connection state changes, i.e. from disconnected to connected.
-        @Override
-        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-            super.onConnectionStateChange(gatt, status, newState);
-            if (newState == BluetoothGatt.STATE_CONNECTED) {
-                writeLine("Connected!");
-                // Discover services.
-                if (!gatt.discoverServices()) {
-                    writeLine("Failed to start discovering services!");
-                }
-            }
-            else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
-                writeLine("Disconnected!");
-            }
-            else {
-                writeLine("Connection state changed.  New state: " + newState);
-            }
-        }
-
-        // Called when services have been discovered on the remote device.
-        // It seems to be necessary to wait for this discovery to occur before
-        // manipulating any services or characteristics.
-        @Override
-        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-            super.onServicesDiscovered(gatt, status);
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                writeLine("Service discovery completed!");
-            }
-            else {
-                writeLine("Service discovery failed with status: " + status);
-            }
-            // Save reference to each characteristic.
-            tx = gatt.getService(UART_UUID).getCharacteristic(TX_UUID);
-            rx = gatt.getService(UART_UUID).getCharacteristic(RX_UUID);
-            // Setup notifications on RX characteristic changes (i.e. data received).
-            // First call setCharacteristicNotification to enable notification.
-            if (!gatt.setCharacteristicNotification(rx, true)) {
-                writeLine("Couldn't set notifications for RX characteristic!");
-            }
-            // Next update the RX characteristic's client descriptor to enable notifications.
-            if (rx.getDescriptor(CLIENT_UUID) != null) {
-                BluetoothGattDescriptor desc = rx.getDescriptor(CLIENT_UUID);
-                desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                if (!gatt.writeDescriptor(desc)) {
-                    writeLine("Couldn't write RX client descriptor value!");
-                }
-            }
-            else {
-                writeLine("Couldn't get RX client descriptor!");
-            }
-        }
-
-        // Called when a remote characteristic changes (like the RX characteristic).
-        @Override
-        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-            super.onCharacteristicChanged(gatt, characteristic);
-            writeLine("Received: " + characteristic.getStringValue(0));
-        }
-    };
-
-    // BTLE device scanning callback.
-    private LeScanCallback scanCallback = new LeScanCallback() {
-        // Called when a device is found.
-        @Override
-        public void onLeScan(BluetoothDevice bluetoothDevice, int i, byte[] bytes) {
-            writeLine("Found device: " + bluetoothDevice.getAddress());
-            // Check if the device has the UART service.
-            if (parseUUIDs(bytes).contains(UART_UUID)) {
-                // Found a device, stop the scan.
-                adapter.stopLeScan(scanCallback);
-                writeLine("Found UART service!");
-                // Connect to the device.
-                // Control flow will now go to the callback functions when BTLE events occur.
-                gatt = bluetoothDevice.connectGatt(getApplicationContext(), false, callback);
-            }
-        }
-    };
 
     // OnCreate, called once to initialize the activity.
     @Override
@@ -131,118 +52,185 @@ public class MainActivity extends Activity {
         messages = (TextView) findViewById(R.id.messages);
         input = (EditText) findViewById(R.id.input);
 
-        adapter = BluetoothAdapter.getDefaultAdapter();
+        // Initialize the deferred manager to the default Android manager which will run callbacks
+        // on the main UI thread by default.
+        dm = new AndroidDeferredManager();
     }
 
     // OnResume, called right before UI is displayed.  Start the BTLE connection.
     @Override
     protected void onResume() {
         super.onResume();
-        // Scan for all BTLE devices.
-        // The first one with the UART service will be chosen--see the code in the scanCallback.
-        writeLine("Scanning for devices...");
-        adapter.startLeScan(scanCallback);
+        // Kick off scan for devices.
+        scanForDevice();
+    }
+
+    // Scan for devices with the UART service and connect to it.
+    private void scanForDevice() {
+        scanner = new AsyncBluetoothLeScan(BluetoothAdapter.getDefaultAdapter());
+        dm.when(scanner.start(UART_UUID))
+            // Progress callback will be called for every device that is found.
+            .progress(new ProgressCallback<AsyncBluetoothLeScan.ScanResult>() {
+                @Override
+                public void onProgress(AsyncBluetoothLeScan.ScanResult progress) {
+                    // Found a device, stop the scan and connect to the device.
+                    writeLine("Found hardware: " + progress.device.getAddress());
+                    scanner.stop();
+                    connectToDevice(progress.device);
+                }
+            })
+            // Done callback is called when the scan is stopped.
+            .done(new DoneCallback<Void>() {
+                @Override
+                public void onDone(Void result) {
+                    writeLine("Finished with scan!");
+                }
+            })
+            // Fail callback is called if the scan fails for some reason.
+            .fail(new FailCallback<Void>() {
+                @Override
+                public void onFail(Void result) {
+                    writeLine("Failed to scan for devices!");
+                }
+            });
+    }
+
+
+    // Connect to the device, discover services, and setup the UART connection.
+    private void connectToDevice(BluetoothDevice device) {
+        gatt = new AsyncBluetoothGatt(device, getApplicationContext(), false);
+        dm.when(gatt.connect())
+            // Fail callback is called if the device connection fails for some reason.
+            .fail(new FailCallback<Integer>() {
+                @Override
+                public void onFail(Integer result) {
+                    writeLine("Connection attempt failed with status: " + result);
+                }
+            })
+            // Once connected, start service discovery and switch to its promise for completion.
+            .then(new DonePipe<Void, Void, Integer, Void>() {
+                @Override
+                public Promise<Void, Integer, Void> pipeDone(Void result) {
+                    writeLine("Connected!");
+                    return gatt.discoverServices();
+                }
+            })
+            // Fail callback called when service discovery fails.
+            .fail(new FailCallback<Integer>() {
+                @Override
+                public void onFail(Integer result) {
+                    writeLine("Failed to discover services!");
+                }
+            })
+            // Done callback is called when service discovery succeeds.
+            .done(new DoneCallback<Void>() {
+                @Override
+                public void onDone(Void result) {
+                    writeLine("Discovered services!");
+                    setupUART();
+                }
+            });
+        // Print a message if the device is disconnected.
+        dm.when(gatt.disconnected())
+            .done(new DoneCallback<Void>() {
+                @Override
+                public void onDone(Void result) {
+                    writeLine("Disconnected!");
+                    // Remove the tx characteristic so messages can't be sent.
+                    tx = null;
+                }
+            });
+    }
+
+    // Setup the UI to send and receive messages.
+    private void setupUART() {
+        // Save reference to RX and TX characteristics.
+        tx = gatt.getService(UART_UUID).getCharacteristic(TX_UUID);
+        rx = gatt.getService(UART_UUID).getCharacteristic(RX_UUID);
+        // Enable notifications for RX characteristic updates.
+        dm.when(gatt.setCharacteristicNotification(rx, true))
+            // Progress callback is called when the characteristic is updated.
+            .progress(new ProgressCallback<BluetoothGattCharacteristic>() {
+                @Override
+                public void onProgress(BluetoothGattCharacteristic progress) {
+                    // Display the received message.
+                    writeLine("Received: " + progress.getStringValue(0));
+                }
+            })
+            // Fail callback is called when notification enable fails.
+            .fail(new FailCallback<Void>() {
+                @Override
+                public void onFail(Void result) {
+                    writeLine("Failed to enable notifications for RX characteristic updates!");
+                }
+            })
+            // Update the RX characteristic's client descriptor after notifications are enabled.
+            .then(new DonePipe<Void, BluetoothGattDescriptor, Integer, Void>() {
+                @Override
+                public Promise<BluetoothGattDescriptor, Integer, Void> pipeDone(Void result) {
+                    BluetoothGattDescriptor client = rx.getDescriptor(CLIENT_UUID);
+                    client.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                    return gatt.writeDescriptor(client);
+                }
+            })
+            // Fail callback is called if the client descriptor update fails.
+            .fail(new FailCallback<Integer>() {
+                @Override
+                public void onFail(Integer result) {
+                    writeLine("Failed to update RX client descriptor!");
+                }
+            })
+            // Done callback is called when the client descriptor is updated.
+            .done(new DoneCallback<BluetoothGattDescriptor>() {
+                @Override
+                public void onDone(BluetoothGattDescriptor result) {
+                    // Woo hoo, we are connected and finished!
+                    writeLine("Ready!");
+                }
+            });
     }
 
     // OnStop, called right before the activity loses foreground focus.  Close the BTLE connection.
     @Override
     protected void onStop() {
         super.onStop();
-        if (gatt != null) {
-            // For better reliability be careful to disconnect and close the connection.
-            gatt.disconnect();
-            gatt.close();
-            gatt = null;
-            tx = null;
-            rx = null;
+        if (scanner != null) {
+            scanner.stop();
         }
+        tx = null;
     }
 
     // Handler for mouse click on the send button.
     public void sendClick(View view) {
-        String message = input.getText().toString();
+        final String message = input.getText().toString();
         if (tx == null || message == null || message.isEmpty()) {
             // Do nothing if there is no device or message to send.
             return;
         }
         // Update TX characteristic value.  Note the setValue overload that takes a byte array must be used.
         tx.setValue(message.getBytes(Charset.forName("UTF-8")));
-        if (gatt.writeCharacteristic(tx)) {
-            writeLine("Sent: " + message);
-        }
-        else {
-            writeLine("Couldn't write TX characteristic!");
-        }
+        dm.when(gatt.writeCharacteristic(tx))
+            .fail(new FailCallback<Integer>() {
+                @Override
+                public void onFail(Integer result) {
+                    writeLine("Couldn't write TX characteristic!");
+                }
+            })
+            .done(new DoneCallback<BluetoothGattCharacteristic>() {
+                @Override
+                public void onDone(BluetoothGattCharacteristic result) {
+                    writeLine("Sent: " + message);
+                }
+            });
     }
 
     // Write some text to the messages text view.
-    // Care is taken to do this on the main UI thread so writeLine can be called
-    // from any thread (like the BTLE callback).
-    private void writeLine(final CharSequence text) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                messages.append(text);
-                messages.append("\n");
-            }
-        });
-    }
-
-    // Filtering by custom UUID is broken in Android 4.3 and 4.4, see:
-    //   http://stackoverflow.com/questions/18019161/startlescan-with-128-bit-uuids-doesnt-work-on-native-android-ble-implementation?noredirect=1#comment27879874_18019161
-    // This is a workaround function from the SO thread to manually parse advertisement data.
-    private List<UUID> parseUUIDs(final byte[] advertisedData) {
-        List<UUID> uuids = new ArrayList<UUID>();
-
-        int offset = 0;
-        while (offset < (advertisedData.length - 2)) {
-            int len = advertisedData[offset++];
-            if (len == 0)
-                break;
-
-            int type = advertisedData[offset++];
-            switch (type) {
-                case 0x02: // Partial list of 16-bit UUIDs
-                case 0x03: // Complete list of 16-bit UUIDs
-                    while (len > 1) {
-                        int uuid16 = advertisedData[offset++];
-                        uuid16 += (advertisedData[offset++] << 8);
-                        len -= 2;
-                        uuids.add(UUID.fromString(String.format("%08x-0000-1000-8000-00805f9b34fb", uuid16)));
-                    }
-                    break;
-                case 0x06:// Partial list of 128-bit UUIDs
-                case 0x07:// Complete list of 128-bit UUIDs
-                    // Loop through the advertised 128-bit UUID's.
-                    while (len >= 16) {
-                        try {
-                            // Wrap the advertised bits and order them.
-                            ByteBuffer buffer = ByteBuffer.wrap(advertisedData, offset++, 16).order(ByteOrder.LITTLE_ENDIAN);
-                            long mostSignificantBit = buffer.getLong();
-                            long leastSignificantBit = buffer.getLong();
-                            uuids.add(new UUID(leastSignificantBit,
-                                    mostSignificantBit));
-                        } catch (IndexOutOfBoundsException e) {
-                            // Defensive programming.
-                            //Log.e(LOG_TAG, e.toString());
-                            continue;
-                        } finally {
-                            // Move the offset to read the next uuid.
-                            offset += 15;
-                            len -= 16;
-                        }
-                    }
-                    break;
-                default:
-                    offset += (len - 1);
-                    break;
-            }
-        }
-        return uuids;
+    private void writeLine(CharSequence text) {
+        messages.append(text);
+        messages.append("\n");
     }
 
     // Boilerplate code from the activity creation:
-
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         
