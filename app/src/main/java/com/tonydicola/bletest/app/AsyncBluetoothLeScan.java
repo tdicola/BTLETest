@@ -133,7 +133,6 @@ public class AsyncBluetoothLeScan implements BluetoothAdapter.LeScanCallback {
             }
             else {
                 // Manually filter service UUIDs if filtering is enabled (workaround for bug in 4.3/4.4)
-                Log.d("Foo", "SEARCHING");
                 List<UUID> serviceUUIDs = result.parseUUIDs();
                 for (UUID uuid : filter) {
                     if (serviceUUIDs.contains(uuid)) {
