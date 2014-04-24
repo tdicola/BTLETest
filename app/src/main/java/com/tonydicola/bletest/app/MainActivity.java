@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
             @Override
             public void onDone(Void result) {
                 // Connected to UART.
+                writeLine("Connected!");
                 uart = device;
             }
         });
