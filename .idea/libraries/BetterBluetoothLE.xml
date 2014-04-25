@@ -1,0 +1,13 @@
+<component name="libraryTable">
+  <library name="BetterBluetoothLE">
+    <CLASSES>
+      <root url="file://$PROJECT_DIR$/app/build/exploded-aar/BetterBluetoothLE/0.1.0.0/res" />
+      <root url="jar://$PROJECT_DIR$/app/build/exploded-aar/BetterBluetoothLE/0.1.0.0/classes.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES>
+      <root url="file://$PROJECT_DIR$/../BetterBluetoothLE/src/main/java" />
+      <root url="file://$PROJECT_DIR$/../BetterBluetoothLE/src/test/java" />
+    </SOURCES>
+  </library>
+</component>

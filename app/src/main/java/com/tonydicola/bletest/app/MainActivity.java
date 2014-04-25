@@ -41,6 +41,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        writeLine("Resuming");
         // Search for first device with UART service.
         UART.findFirst(adapter, this, false)
             .done(new DoneCallback<UART>() {
@@ -51,6 +52,7 @@ public class MainActivity extends Activity {
                     connect(result);
                 }
             });
+        writeLine("Resumed");
     }
 
     // Connect to the specified UART device.
