@@ -25,11 +25,19 @@
         android:layout_alignParentTop="true"
         android:layout_alignParentLeft="true"/>
 
+    <Button
+        android:id="@+id/second"
+        android:layout_alignParentBottom="true"
+        android:text="Second Activity"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:onClick="secondActivity"/>
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_below="@id/send"
-        android:layout_alignParentBottom="true">
+        android:layout_above="@id/second">
 
         <TextView
             android:id="@+id/messages"
@@ -37,6 +45,8 @@
             android:layout_height="wrap_content" />
 
     </ScrollView>
+
+
 
 
 </RelativeLayout>
