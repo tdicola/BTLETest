@@ -27,7 +27,7 @@ android {
 
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
-    compile ':betterbluetoothle:0.1.0.0@aar'
+    compile ':BetterBluetoothLE:0.1.0.0@aar'
     compile 'org.jdeferred:jdeferred-android-aar:1.2.0'
     compile 'com.google.guava:guava:17.0'
     compile 'com.android.support:appcompat-v7:19.1.+'
